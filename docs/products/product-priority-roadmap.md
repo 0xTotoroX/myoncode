@@ -7,11 +7,13 @@
 
 # 产品优先级路线图
 
+当前开发状态与剩余验收以 [SaaS 验收表的最新核对](saas-acceptance.md#当前代码基线)为入口。下文是早期路线排序：其中 `v1.4.0` 基线、登录页 Demo 入口和微信优先顺序不代表当前实现或新决定；当前主线仍是 Web 服务验收与经用户确认后的新设计逐页迁移。
+
 ## 2026-09-12 完成的本地修正
 
 临床工作流的归属权限、随访编辑、最新状态、日期口径、表单恢复、摘要一致性与 V3 可读性已纳入 `improve-clinical-workflows`。后续发布需先执行追加数据库迁移，并在目标环境验证登录后的真实 CRUD；本轮未执行远端发布。下面保留早期路线图，不能把历史版本号当作当前线上状态。
 
-## 当前基准
+## 早期基准（历史）
 
 - 当前发布基线：`v1.4.0` / `2a1bd34`。
 - 当前归档状态：`add-lab-analytics-page`、`add-clinical-ai-analysis`、`add-secure-record-sharing`、`restore-minimal-timeline-table-view`、`make-demo-mode-cover-full-product`、`add-cross-platform-pwa-foundation`、`add-capacitor-mobile-shell` 已归档进 `openspec/changes/archive/2026-05-16-*`，行为已并入 baseline specs。

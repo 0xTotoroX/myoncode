@@ -13,6 +13,6 @@ archive/: 历史 PRD、spec 与 Goal 草案；旧设计系统和 Stitch 映射�
 
 saas-refactoring-plan.md: 2026-09-02 SaaS 专业化重构的历史阶段、决策与回滚说明；不是当前十部分任务书或前端迁移执行清单。
 
-法则: 当前状态先读 prd-implementation-status.md；下一步排序先读 product-priority-roadmap.md；历史意图和旧 Goal 草案再读 archive/。
+法则: 当前状态先读 saas-acceptance.md 的最新核对与对应运维证据；prd-implementation-status.md 和 product-priority-roadmap.md 保留历史盘点与排序依据，不覆盖当前范围；旧 Goal 草案再读 archive/。
 
 [PROTOCOL]: 结构或契约事实变化时更新本文；仅在父级描述受影响时检查父级 AGENTS.md，已加载且未变化的内容不重读。

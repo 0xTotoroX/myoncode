@@ -22,7 +22,7 @@ follow-up-storage.ts: 随访 CRUD、日期顺序与患者关联校验。
 dashboard-data.ts: 计数与最新指标/随访聚合，保留各分区错误。
 
 提取与记录输出
-extraction.ts: 结构化提取、确定性补全、追问合并、模型身份清洗与失败恢复。
+extraction.ts: 结构化提取请求、JSON 解析、缺失字段追问与失败恢复；纯数据清洗/补全/合并委托 records/patient-record-normalization，保留既有导出入口。
 extraction-prompt.ts: 紧凑的 PatientRecord 输出字段合同。
 medical-document-ocr.ts: 图片/PDF 校验、账号绑定的单次 OCR 请求和本地化错误映射。
 pdf-report-images.ts: PDF.js 同源渲染、按页排序转图、整份报告载荷限制和资源释放。

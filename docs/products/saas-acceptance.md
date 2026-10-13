@@ -13,6 +13,41 @@
 
 ## 当前代码基线
 
+### 2026-10-13 综合核对
+
+本节为最近一次代码、Git 和交付记录核对。完整外部服务证据沿用 10 月 6～9 日的[自托管手册](../operations/supabase-self-hosted.md)与[腾讯云操作单](../operations/tencent-cloud-cutover.md)；本轮仅补只读公网检查：首页返回 200，线上源码清单修订为 `f67934a`，源码包摘要与最后部署记录一致，未重新下载校验分卷或执行登录/模型/数据库验收。下面保留旧日期的原始记录，旧基线与旧待办不得覆盖本节。
+
+- 实际仓库为 `Documents/Projects/myoncode`，`Firefly-Isle` 是兼容符号链接；远端为 `0xTotoroX/myoncode`。本轮开始时 `main` 与 fetch 后的 `origin/main` 同为 `e8ee53e`，工作区干净、无 stash。
+- `main` 已包含 SaaS、品牌、AGPL 对应源码分发、原生滚动及腾讯云部署改动。另一个 license worktree 干净，所指提交已在 main 中；不代表另一套仍待整合的产品。
+- GitHub 最新 Release 与 package 版本仍为 `v1.5.0`；远端 main 在该标签之后有 107 个提交。版本号不能代表当前测试站构建，部署应核对 SHA。`v2.0.0` 仍是既有候选，不在本轮发布。
+
+| 分支（本轮开始时，相对 origin/main） | 独有提交 | 已落后提交 | 结论 |
+| --- | --- | --- | --- |
+| `main` | 0 | 0 | 唯一当前主干 |
+| `codex/saas-product-completion`（本地/远端） | 0 | 38 | 已全部进入 main，保留历史分支 |
+| `codex/agpl-source-distribution`（license worktree） | 0 | 23 | 已全部进入 main；附属工作区仍存在 |
+| `codex/license-agpl-3-only-20261005` | 0 | 25 | 已全部进入 main |
+| `codex/native-scroll-motion` | 0 | 24 | 已全部进入 main |
+| `origin/dependabot/npm_and_yarn/minor-and-patch-ed94b951d1` | 1 | 0 | 唯一开放的 [PR #17](https://github.com/0xTotoroX/myoncode/pull/17)，8 项依赖更新；GitHub 报告可合并且 CI 通过，仍待审查 |
+| `origin/legacy-main` | 8 | 193 | 旧原型历史，不能当作当前待合并产品功能 |
+
+本地另留 `origin/dependabot/npm_and_yarn/minor-and-patch-04e1cc7ff2` 远端跟踪引用；`git ls-remote --heads origin` 已无此分支。本轮保留引用、分支及 worktree，不执行删除或合并。
+
+| 当前阶段 | 已有证据 | 仍需完成 |
+| --- | --- | --- |
+| 核心 Web 工作流 | 17 项保留范围中的 Web 主体已有代码；Demo、病历、化验、随访、症状、分享、导出、账号隔离等有回归覆盖 | 各项真实服务与跨端边界分别验收，不以测试总数给出产品完成百分比 |
+| AI 与数据闭环 | 上海目标已追加六份迁移及配套函数；记录过真实 DeepSeek 文本提取、图片/两页 PDF OCR、人工复核、事务保存、刷新读回及隔离验证 | 模型内容仍需人工复核；真实患者服务不能由合成流程验收替代 |
+| 测试站与部署 | `https://myoncode.com` 使用腾讯云海外 Makers，上海 API 暂用可信 HTTPS IP；最新记录部署 `dpwtev4r050z` 对应源码 `f67934a`，缓存头、源码包和导出已验 | `api.myoncode.com`、备案最终状态及页面内容、正式患者服务门槛、异机恢复；自动 CD 缺 Makers Secret 是上次记录，本轮未读取 secret 配置 |
+| 正式账号与外部服务 | 密码/匿名登录和 BYOK 存取有既有验收 | SMTP 注册确认/找回邮件、Google OAuth、真实支付与告警接收仍未完成各自验收；订阅未上线 |
+| 新界面 | 知见 / MyOncode 品牌与共通排版已进入主干；首轮 AI Native 原型完成关键浏览器检查 | 用户视觉审核、正式设计规范和逐页接入；原型没有替换现有产品前端 |
+| 其他端与开发环境 | PWA 与 Capacitor 壳已有基线；Codex Cloud 有旧基线验证 | 原生深链路/文件导出/真机、小程序独立交付、最新提交的独立云开发任务 |
+
+OpenSpec 实际清单为：SaaS `16/20`、自托管 `11/15`、账户档案 `10/11`，另有 7 项清单完成但未归档。任务勾选存在滞后：旧自托管条目仍描述迁移旧数据与冻结源库，而用户已确认测试数据直接切换；账户档案的人工验收也不能仅凭部署过 SQL 勾选完成。本轮不把这些数字换算成产品完成率，后续按新增证据同步对应合同。
+
+本轮代码整理将病历归一化、可信身份处理、原文补全和追问合并移入 `src/lib/records/patient-record-normalization.ts`，`extraction.ts` 保留模型请求、JSON 解析、追问编排及兼容导出；12 处重复字符串清洗统一使用已有规则。未改变数据合同、模型策略或页面行为。Node.js 22.23.3 下 106 个文件 / 782 项测试、完整类型检查、lint 与生产构建通过；相关文档本地链接和 diff 空白检查通过。构建仍有既有的 >500 kB 分包提示，不代表测得的运行性能。本轮未重做浏览器人工操作、隔离数据库或真机验收。`npm audit --omit=dev` 报告 0 项已知漏洞，仅代表该时点生产依赖审计，未审计开发依赖。上游 `e8ee53e` 的 [GitHub CI](https://github.com/0xTotoroX/myoncode/actions/runs/37840353102) 已成功，本轮本地改动尚未推送，不借用上游 CI 作为新提交结果。
+
+### 2026-10-02 整合前基线（历史）
+
 2026-10-02 重新 fetch 后，本地与远端 `main` 均为 `2f1e42e`，工作树干净，无 stash；本轮从它创建 `codex/saas-product-completion`。主开发目录只有一个 Git worktree。
 
 | 目录／分支 | 本地独有内容 | 远端独有内容 | 未提交内容 | 已处理／后续处理 | 验收情况 |
@@ -29,7 +64,7 @@
 
 ## 17 项功能核对
 
-下表持续记录本轮实现与验收，未完成的实际服务检查保留在最后一列。所有服务验收使用合成数据，避免在用户病历上做破坏性测试。
+下表保留 10 月 2～4 日逐项实现与验收依据；真实模型/OCR、后端和测试站等后续结果见上方最新核对与对应运维记录，不能把旧“待配置”当作当前全部状态。所有服务验收使用合成数据，避免在用户病历上做破坏性测试。
 
 | 功能 | 实现与验证 | 剩余验收或边界 |
 | --- | --- | --- |
@@ -70,13 +105,13 @@
 
 Web 与小程序共用领域模型和受鉴权服务端操作。将来只读 API 应返回专门 DTO，默认排除用户标识、源文件路径、OCR 原文、模型密文与分享 hash；不得直接开放数据库全表。个人访问令牌应只在服务端保存 hash，按账号、用途与最小 scope 授权，支持到期、撤销、限流和审计；不能用 service-role key 代替用户令牌。MCP 与 CLI 日后作为这些 API 的客户端，不复制另一套数据真相。本轮只记录边界，不创建令牌或开放新接口。
 
-## 交付状态
+## 2026-10-02 交付状态（历史）
 
 本地服务证据来自独立临时 Supabase：CLI 2.115.0、Edge Runtime 1.74.3、Auth ES256 JWT。LLM/OCR 无 JWT 为网关 401，有效 JWT 能进入 handler 的输入校验；BYOK 加密存取和角色隔离通过。测试未连接真实模型和支付 provider，未修改生产数据。合成账户、邮件、导出文件和运行日志不加入 Git。
 
 本轮产品代码已分别保存为 `5eb85a7`（数据权限、幂等创建与原子记账）、`a4b3191`（用户流程、Demo 与导出）和 `2754acd`（开发分支 CI）。交付分支为 `codex/saas-product-completion`，`main` 仍为 `2f1e42e`。本地证据见本文件，远端检查按 [GitHub CI 的实际提交与结果](https://github.com/0xTotoroX/Firefly-Isle/actions/workflows/ci.yml?query=branch%3Acodex%2Fsaas-product-completion)核对；分支同步不执行产品部署。
 
-当前结论：尚未完成全部任务书。未选名称、未选正式布局、未完成产品托管决策与小程序交付，均保留为明确待办；后续只能按新增证据更新状态，不能把“已有代码”直接改成“已上线”。
+当时结论：尚未完成全部任务书。名称和托管后来已有决定，后续证据见上方最新核对；正式布局与小程序仍待交付，不能把“已有代码”直接改成“已上线”。
 
 
 ## 2026-10-03 运行环境续验

@@ -4,12 +4,12 @@
 
 ## 尚有待办的清单
 
-以下为 2026-10-04 `openspec list --json` 的本地清单快照，不是新的执行顺序，也不代表远端状态。后续使用同一命令查询最新进度。
+以下为 2026-10-13 `openspec list --json` 的本地清单快照，不是新的执行顺序，也不代表远端状态。后续使用同一命令查询最新进度。清单仍有旧迁移方案等滞后项，实际交付先核对[最新验收记录](../docs/products/saas-acceptance.md#当前代码基线)，不按勾选数判断产品完成度。
 
 | 变更 | 清单进度 | 入口 |
 | --- | --- | --- |
 | SaaS 用户流程 | 16 / 20 | [complete-saas-user-workflows](changes/complete-saas-user-workflows/tasks.md) |
-| 自托管准备 | 9 / 15 | [self-host-supabase](changes/self-host-supabase/tasks.md) |
+| 自托管准备 | 11 / 15 | [self-host-supabase](changes/self-host-supabase/tasks.md) |
 | 账户档案 | 10 / 11 | [add-account-profiles](changes/add-account-profiles/tasks.md) |
 
 ## 清单完成但尚未归档

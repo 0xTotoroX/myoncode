@@ -1,26 +1,22 @@
 /**
- * [INPUT]: 依赖 @/lib/llm 的 chat 边界、@/lib/extraction-prompt、@/types/patient。
+ * [INPUT]: 依赖 @/lib/llm 的 chat 边界、@/lib/extraction-prompt、records/patient-record-normalization 与 @/types/patient。
  * [OUTPUT]: 对外提供 MAX_FOLLOW_UP_ROUNDS、ExtractionParseError、normalizePatientRecord、getMissingCriticalFields、mergePatientRecord、buildFollowUpQuestion、parsePatientRecordResponse、getExtractionFailureMessage、extractPatientRecord 与 runExtractionWithFollowUps，保留姓名/性别/年龄/身高/体重确定性补全、临床备注、模型 id 清洗、labResults 独立结构、中文/点号日期归一化、错误文案分流、单消息 JSON mode 降级重试与 502 Gemini 系统兜底。
- * [POS]: src/lib 的信息提取主链路，把解析、归一化、缺失字段检测与追问 merge 收敛在一处。
+ * [POS]: src/lib 的信息提取主链路，编排 JSON 解析、缺失字段追问与模型失败恢复；纯数据归一化和合并委托 records 模块，保留原导出入口。
  * [PROTOCOL]: 依赖、导出或职责变化时更新此头部；仅在模块描述受影响时检查所属模块的 AGENTS.md，已加载且未变化的内容不重读。
  */
 import { buildExtractionPrompt } from '@/lib/extraction-prompt'
 import { ChatError, chat } from '@/lib/llm'
 import type { Locale } from '@/lib/locale'
 import { type Message } from '@/lib/llm/types'
-import type { BasicInfo, LabResult, LabResultCategory, LabResultSource, PatientRecord, TreatmentLine } from '@/types/patient'
+import type { PatientRecord } from '@/types/patient'
+import { applySourceTextBasicInfo, mergePatientRecord, normalizePatientRecord } from '@/lib/records/patient-record-normalization'
+
+export { mergePatientRecord, normalizePatientRecord } from '@/lib/records/patient-record-normalization'
 
 const CRITICAL_FIELDS = ['tumorType', 'stage', 'regimen'] as const
-const DATE_PATTERN = /^\d{4}-(\d{2})(-\d{2})?$/
-const LAB_CATEGORIES = new Set<LabResultCategory>(['blood-routine', 'blood-biochemistry', 'tumor-marker'])
-const LAB_SOURCES = new Set<LabResultSource>(['ocr', 'manual', 'test', 'derived'])
 export const MAX_FOLLOW_UP_ROUNDS = 3
 
 type CriticalField = (typeof CRITICAL_FIELDS)[number]
-
-type NormalizePatientRecordOptions = {
-  preserveId?: boolean
-}
 
 export class ExtractionParseError extends Error {
   rawResponse: string
@@ -45,238 +41,6 @@ function stripMarkdownFences(input: string) {
     .trim()
 }
 
-function normalizeNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
-
-  if (typeof value === 'string') {
-    const normalized = Number(value.trim())
-    return Number.isFinite(normalized) ? normalized : undefined
-  }
-
-  return undefined
-}
-
-function normalizeDate(value: unknown) {
-  if (typeof value !== 'string') {
-    return undefined
-  }
-
-  const parts = value
-    .trim()
-    .replace(/[年/.]/g, '-')
-    .replace(/月/g, '-')
-    .replace(/日/g, '')
-    .replace(/-+$/g, '')
-    .split('-')
-    .filter(Boolean)
-
-  if (parts.length !== 2 && parts.length !== 3) {
-    return undefined
-  }
-
-  const [year, month, day] = parts
-
-  if (!/^\d{4}$/.test(year) || !/^\d{1,2}$/.test(month) || (day !== undefined && !/^\d{1,2}$/.test(day))) {
-    return undefined
-  }
-
-  const monthNumber = Number(month)
-  const dayNumber = day === undefined ? undefined : Number(day)
-
-  if (monthNumber < 1 || monthNumber > 12 || (dayNumber !== undefined && (dayNumber < 1 || dayNumber > 31))) {
-    return undefined
-  }
-
-  const normalized = `${year}-${month.padStart(2, '0')}${day === undefined ? '' : `-${day.padStart(2, '0')}`}`
-  return DATE_PATTERN.test(normalized) ? normalized : undefined
-}
-
-function normalizeTreatmentLine(line: Partial<TreatmentLine> | undefined, fallbackLineNumber: number, preserveId: boolean): TreatmentLine {
-  return {
-    id: preserveId ? normalizeString(line?.id) : undefined,
-    lineNumber: normalizeNumber(line?.lineNumber) ?? fallbackLineNumber,
-    startDate: normalizeDate(line?.startDate),
-    endDate: normalizeDate(line?.endDate),
-    regimen: typeof line?.regimen === 'string' && line.regimen.trim() ? line.regimen.trim() : undefined,
-    biopsy: typeof line?.biopsy === 'string' && line.biopsy.trim() ? line.biopsy.trim() : undefined,
-    immunohistochemistry:
-      typeof line?.immunohistochemistry === 'string' && line.immunohistochemistry.trim()
-        ? line.immunohistochemistry.trim()
-        : undefined,
-    geneticTest:
-      typeof line?.geneticTest === 'string' && line.geneticTest.trim() ? line.geneticTest.trim() : undefined,
-  }
-}
-
-function normalizeString(value: unknown) {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
-function numberFromMatch(match: RegExpMatchArray | null) {
-  return normalizeNumber(match?.[1])
-}
-
-function inRange(value: number | undefined, min: number, max: number) {
-  return value !== undefined && value >= min && value <= max ? value : undefined
-}
-
-function extractDemographicName(input: string) {
-  const explicit = input.match(/(?:患者姓名|病人姓名|姓名)[:：]?\s*([\u4e00-\u9fa5A-Za-z·]{2,12})/)
-
-  if (explicit?.[1]) {
-    return explicit[1].trim()
-  }
-
-  for (const line of input.split(/\n+/).map((item) => item.trim())) {
-    if (!/\d{1,3}\s*岁/.test(line) || !/(^|[，,、\s])(男|女)(?=$|[，,。；;\s])/.test(line)) {
-      continue
-    }
-
-    const inferred = line.match(/^([\u4e00-\u9fa5A-Za-z·]{2,12})[，,、\s]+(?:\d{1,3}\s*岁|男|女)/)
-    if (inferred?.[1]) {
-      return inferred[1].trim()
-    }
-  }
-
-  return undefined
-}
-
-function extractBasicInfoFromText(input: string): Partial<BasicInfo> | undefined {
-  const age = inRange(numberFromMatch(input.match(/(?:年龄[:：]?\s*)?(\d{1,3})\s*岁/)), 0, 130)
-  const height = inRange(
-    numberFromMatch(input.match(/身高[:：]?\s*(\d{2,3}(?:\.\d+)?)\s*(?:厘米|cm)?/i)) ??
-      numberFromMatch(input.match(/(\d{2,3}(?:\.\d+)?)\s*(?:厘米|cm)/i)),
-    40,
-    260,
-  )
-  const weight = inRange(
-    numberFromMatch(input.match(/体重[:：]?\s*(\d{2,3}(?:\.\d+)?)\s*(?:千克|公斤|kg)?/i)) ??
-      numberFromMatch(input.match(/(\d{2,3}(?:\.\d+)?)\s*(?:千克|公斤|kg)/i)),
-    1,
-    300,
-  )
-  const gender = input.match(/(?:^|[，,。；;\s])(男|女)(?=$|[，,。；;\s])/)?.[1]
-  const basicInfo: Partial<BasicInfo> = {
-    age,
-    gender,
-    height,
-    name: extractDemographicName(input),
-    weight,
-  }
-  const entries = Object.entries(basicInfo).filter(([, value]) => value !== undefined)
-
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined
-}
-
-function applySourceTextBasicInfo(record: PatientRecord, input: string): PatientRecord {
-  const basicInfo = extractBasicInfoFromText(input)
-
-  if (!basicInfo) {
-    return record
-  }
-
-  return normalizePatientRecord({
-    ...record,
-    basicInfo: mergeDefinedFields(record.basicInfo, basicInfo),
-  })
-}
-
-function normalizeLabCategory(value: unknown): LabResultCategory | undefined {
-  return typeof value === 'string' && LAB_CATEGORIES.has(value as LabResultCategory) ? (value as LabResultCategory) : undefined
-}
-
-function normalizeLabSource(value: unknown): LabResultSource | undefined {
-  return typeof value === 'string' && LAB_SOURCES.has(value as LabResultSource) ? (value as LabResultSource) : undefined
-}
-
-function normalizeLabResult(reading: Partial<LabResult> | undefined, preserveId: boolean): LabResult | null {
-  const category = normalizeLabCategory(reading?.category)
-  const itemCode = normalizeString(reading?.itemCode)
-  const itemName = normalizeString(reading?.itemName)
-  const value = normalizeNumber(reading?.value)
-
-  if (!category || !itemCode || !itemName || value === undefined) {
-    return null
-  }
-
-  return {
-    id: preserveId ? normalizeString(reading?.id) : undefined,
-    batchId: preserveId ? normalizeString(reading?.batchId) : undefined,
-    category,
-    derivationMethod: normalizeString(reading?.derivationMethod),
-    isDerived: reading?.isDerived === true,
-    itemCode,
-    itemName,
-    referenceHigh: normalizeNumber(reading?.referenceHigh),
-    referenceLow: normalizeNumber(reading?.referenceLow),
-    source: normalizeLabSource(reading?.source),
-    testDate: normalizeDate(reading?.testDate),
-    unit: normalizeString(reading?.unit),
-    value,
-  }
-}
-
-export function normalizePatientRecord(input: Partial<PatientRecord>, options: NormalizePatientRecordOptions = {}): PatientRecord {
-  const preserveId = options.preserveId ?? true
-  const treatmentLines = Array.isArray(input.treatmentLines)
-    ? input.treatmentLines.map((line, index) => normalizeTreatmentLine(line, index + 1, preserveId))
-    : []
-  const labResults = Array.isArray(input.labResults)
-    ? input.labResults.map((reading) => normalizeLabResult(reading, preserveId)).filter((reading): reading is LabResult => reading !== null)
-    : undefined
-
-  return {
-    id: preserveId && typeof input.id === 'string' && input.id.trim() ? input.id.trim() : undefined,
-    followUpStatus: preserveId ? input.followUpStatus : undefined,
-    basicInfo: input.basicInfo
-      ? {
-          name:
-            typeof input.basicInfo.name === 'string' && input.basicInfo.name.trim()
-              ? input.basicInfo.name.trim()
-              : undefined,
-          gender:
-            typeof input.basicInfo.gender === 'string' && input.basicInfo.gender.trim()
-              ? input.basicInfo.gender.trim()
-              : undefined,
-          age: normalizeNumber(input.basicInfo.age),
-          height: normalizeNumber(input.basicInfo.height),
-          weight: normalizeNumber(input.basicInfo.weight),
-          tumorType:
-            typeof input.basicInfo.tumorType === 'string' && input.basicInfo.tumorType.trim()
-              ? input.basicInfo.tumorType.trim()
-              : undefined,
-          diagnosisDate: normalizeDate(input.basicInfo.diagnosisDate),
-          stage:
-            typeof input.basicInfo.stage === 'string' && input.basicInfo.stage.trim()
-              ? input.basicInfo.stage.trim()
-              : undefined,
-      }
-      : undefined,
-    clinicalNotes: normalizeString(input.clinicalNotes),
-    initialOnset: input.initialOnset
-      ? {
-          triggerDate: normalizeDate(input.initialOnset.triggerDate),
-          treatment:
-            typeof input.initialOnset.treatment === 'string' && input.initialOnset.treatment.trim()
-              ? input.initialOnset.treatment.trim()
-              : undefined,
-          immunohistochemistry:
-            typeof input.initialOnset.immunohistochemistry === 'string' && input.initialOnset.immunohistochemistry.trim()
-              ? input.initialOnset.immunohistochemistry.trim()
-              : undefined,
-          geneticTest:
-            typeof input.initialOnset.geneticTest === 'string' && input.initialOnset.geneticTest.trim()
-              ? input.initialOnset.geneticTest.trim()
-              : undefined,
-        }
-      : undefined,
-    labResults: labResults && labResults.length > 0 ? labResults : undefined,
-    treatmentLines: treatmentLines.sort((a, b) => a.lineNumber - b.lineNumber),
-  }
-}
-
 export function getMissingCriticalFields(record: PatientRecord): string[] {
   const missing = new Set<string>()
 
@@ -299,70 +63,6 @@ export function getMissingCriticalFields(record: PatientRecord): string[] {
   }
 
   return [...missing]
-}
-
-function mergeTreatmentLines(current: TreatmentLine[], incoming: TreatmentLine[]) {
-  const byLineNumber = new Map<number, TreatmentLine>()
-
-  for (const line of current) {
-    byLineNumber.set(line.lineNumber, line)
-  }
-
-  for (const line of incoming) {
-    const existing = byLineNumber.get(line.lineNumber)
-
-    byLineNumber.set(line.lineNumber, {
-      ...existing,
-      ...line,
-      id: existing?.id,
-      lineNumber: line.lineNumber,
-      regimen: line.regimen ?? existing?.regimen,
-      biopsy: line.biopsy ?? existing?.biopsy,
-      immunohistochemistry: line.immunohistochemistry ?? existing?.immunohistochemistry,
-      geneticTest: line.geneticTest ?? existing?.geneticTest,
-      startDate: line.startDate ?? existing?.startDate,
-      endDate: line.endDate ?? existing?.endDate,
-    })
-  }
-
-  return [...byLineNumber.values()].sort((a, b) => a.lineNumber - b.lineNumber)
-}
-
-function mergeLabResults(current: LabResult[] | undefined, incoming: LabResult[] | undefined) {
-  if (!incoming?.length) return current
-  const merged = [...(current ?? [])]
-  for (const reading of incoming) {
-    const repeated = reading.testDate && merged.some((existing) =>
-      existing.testDate === reading.testDate && existing.category === reading.category &&
-      existing.itemCode === reading.itemCode && existing.value === reading.value && existing.unit === reading.unit)
-    if (!repeated) merged.push(reading)
-  }
-  return merged
-}
-
-function mergeDefinedFields<T extends object>(current: T | undefined, incoming: T | undefined): T | undefined {
-  const next = { ...(current ?? {}) } as Record<string, unknown>
-
-  for (const [key, value] of Object.entries(incoming ?? {})) {
-    if (value !== undefined) {
-      next[key] = value
-    }
-  }
-
-  return Object.keys(next).length > 0 ? (next as T) : undefined
-}
-
-export function mergePatientRecord(current: PatientRecord, incoming: Partial<PatientRecord>) {
-  const normalizedIncoming = normalizePatientRecord(incoming, { preserveId: false })
-
-  return normalizePatientRecord({
-    ...current,
-    basicInfo: mergeDefinedFields(current.basicInfo, normalizedIncoming.basicInfo),
-    clinicalNotes: normalizedIncoming.clinicalNotes ?? current.clinicalNotes,
-    initialOnset: mergeDefinedFields(current.initialOnset, normalizedIncoming.initialOnset),
-    labResults: mergeLabResults(current.labResults, normalizedIncoming.labResults),
-    treatmentLines: mergeTreatmentLines(current.treatmentLines, normalizedIncoming.treatmentLines),
-  })
 }
 
 export function buildFollowUpQuestion(missingFields: string[]) {
