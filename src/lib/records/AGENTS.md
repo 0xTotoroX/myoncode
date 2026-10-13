@@ -5,6 +5,7 @@
 
 成员清单
 patient-record-storage.ts: 病历/治疗线/化验映射与摘要分页；保存使用核对当前账号的事务 RPC，草稿重试复用 createRequestId。
+patient-record-normalization.ts: 病历字段与日期归一化、原文人口学补全、追问数据合并及可信身份保留；纯转换，不调用模型或存储。
 record-editing.ts: 自然语言编辑转为字段 patch，校验目标并归一化合并。
 record-edit-queue.ts: 按病历和账号串行保存字段 patch，下一次编辑基于最后成功保存的记录。
 record-sharing.ts: 授权码 hash、所有者分享管理与脱敏只读 RPC。
